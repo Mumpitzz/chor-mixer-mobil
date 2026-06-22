@@ -599,16 +599,9 @@ function makeEngine(prefix) {
   }
 
   function connectToWebAudio(i) {
-    if (!actx || srcNodes[i] || !audioEls[i] || !audioEls[i].src) return;
-    try {
-      var src = actx.createMediaElementSource(audioEls[i]);
-      var g   = actx.createGain();
-      g.gain.value = mutedArr[i] ? 0 : Math.max(0, Math.min(1, volumes[i] || 0.8));
-      src.connect(g);
-      g.connect(actx.destination);
-      srcNodes[i] = src;
-      gainNodes[i] = g;
-    } catch(e){ console.warn('connectToWebAudio error', e); }
+    // Deliberately empty - createMediaElementSource causes fragmentation
+    // on iOS when combined with playbackRate changes.
+    // Volume is controlled via audio.volume directly instead.
   }
 
   function applyRates() {
@@ -641,6 +634,7 @@ function makeEngine(prefix) {
     // Remove old audio elements from DOM
     audioEls.forEach(function(a){try{if(a.parentNode)a.parentNode.removeChild(a);}catch(e){}});
     audioEls=[];
+    srcNodes=[]; gainNodes=[];  // clear any old Web Audio connections
     volumes = new Array(n).fill(0.8);
     mutedArr= new Array(n).fill(false);
     duration=0;
@@ -668,22 +662,13 @@ function makeEngine(prefix) {
 
   function setVolume(i, vol) {
     volumes[i] = vol;
-    if (gainNodes[i] && actx) {
-      gainNodes[i].gain.setTargetAtTime(vol, actx.currentTime, 0.01);
-    } else if (audioEls[i]) {
-      audioEls[i].volume = mutedArr[i] ? 0 : Math.max(0, Math.min(1, vol));
-    }
+    if (audioEls[i]) audioEls[i].volume = mutedArr[i] ? 0 : Math.max(0, Math.min(1, vol));
   }
 
   function setMuted(i, isMuted, vol) {
     mutedArr[i] = isMuted;
     if (vol !== undefined) volumes[i] = vol;
-    var v = isMuted ? 0 : Math.max(0, Math.min(1, volumes[i] || 0.8));
-    if (gainNodes[i] && actx) {
-      gainNodes[i].gain.setTargetAtTime(v, actx.currentTime, 0.01);
-    } else if (audioEls[i]) {
-      audioEls[i].volume = v;
-    }
+    if (audioEls[i]) audioEls[i].volume = isMuted ? 0 : Math.max(0, Math.min(1, volumes[i] || 0.8));
   }
 
   function stop() {
@@ -700,16 +685,10 @@ function makeEngine(prefix) {
 
   function startPlay() {
     if (!audioEls.some(function(a){return a&&a.src;})) { toast('Keine Audiodateien geladen'); return; }
-    // Connect to Web Audio API for volume control (after unlock, context is running)
-    audioEls.forEach(function(a,i){ if(a&&a.src) connectToWebAudio(i); });
     applyRates();
     audioEls.forEach(function(a,i){
       if(!a||!a.src) return;
-      // Apply current volume via GainNode
-      if (gainNodes[i] && actx) {
-        var v = mutedArr[i] ? 0 : Math.max(0, Math.min(1, volumes[i] || 0.8));
-        gainNodes[i].gain.value = v;
-      }
+      a.volume = mutedArr[i] ? 0 : Math.max(0, Math.min(1, volumes[i] || 0.8));
       a.play().catch(function(e){console.warn('play error',e);});
     });
     playing=true;
