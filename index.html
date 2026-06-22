@@ -629,6 +629,8 @@ function makeEngine(prefix) {
     srcNodes=[];
     gainNodes.forEach(function(g){try{g.disconnect();}catch(e){}});
     gainNodes=[];
+    // Remove old audio elements from DOM
+    audioEls.forEach(function(a){try{if(a.parentNode)a.parentNode.removeChild(a);}catch(e){}});
     audioEls=[];
     volumes = new Array(n).fill(0.8);
     mutedArr= new Array(n).fill(false);
@@ -640,6 +642,8 @@ function makeEngine(prefix) {
       a.crossOrigin='anonymous';
       a.preload='auto';
       a.volume=0.8;
+      a.style.display='none';
+      document.body.appendChild(a);  // iOS requires audio elements in DOM
       audioEls[i]=a;
       (function(idx){
         a.addEventListener('ended', function(){
