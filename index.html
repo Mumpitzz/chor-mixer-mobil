@@ -235,16 +235,7 @@
           <button class="play-btn" id="ens-play-btn" onclick="ensTogglePlay()">▶</button>
           <button class="transport-btn" id="ens-loop-btn" onclick="ensToggleLoop()">🔁</button>
         </div>
-        <div class="tempo-row">
-          <span class="tempo-label">Tempo</span>
-          <input type="range" min="50" max="150" value="100" id="ens-tempo-slider" oninput="ensSetTempo(this.value)">
-          <span class="tempo-val" id="ens-tempo-val">100%</span>
-        </div>
-        <div class="tempo-row" style="margin-top:.6rem;padding-top:.6rem">
-          <span class="tempo-label">Tonlage</span>
-          <input type="range" min="-6" max="6" value="0" step="1" id="ens-pitch-slider" oninput="ensSetPitch(this.value)">
-          <span class="tempo-val" id="ens-pitch-val">0 HT</span>
-        </div>
+
         <div style="display:flex;align-items:center;justify-content:space-between;margin-top:.75rem;padding-top:.75rem;border-top:1px solid var(--surface3)">
           <span style="font-size:.78rem;color:var(--text3)">Metronom</span>
           <div style="display:flex;align-items:center;gap:8px">
@@ -361,16 +352,7 @@
           <button class="play-btn" id="adm-play-btn" onclick="admTogglePlay()">▶</button>
           <button class="transport-btn" id="adm-loop-btn" onclick="admToggleLoop()">🔁</button>
         </div>
-        <div class="tempo-row">
-          <span class="tempo-label">Tempo</span>
-          <input type="range" min="50" max="150" value="100" id="adm-tempo-slider" oninput="admSetTempo(this.value)">
-          <span class="tempo-val" id="adm-tempo-val">100%</span>
-        </div>
-        <div class="tempo-row" style="margin-top:.6rem;padding-top:.6rem">
-          <span class="tempo-label">Tonlage</span>
-          <input type="range" min="-6" max="6" value="0" step="1" id="adm-pitch-slider" oninput="admSetPitch(this.value)">
-          <span class="tempo-val" id="adm-pitch-val">0 HT</span>
-        </div>
+
         <div style="display:flex;align-items:center;justify-content:space-between;margin-top:.75rem;padding-top:.75rem;border-top:1px solid var(--surface3)">
           <span style="font-size:.78rem;color:var(--text3)">Metronom</span>
           <div style="display:flex;align-items:center;gap:8px">
@@ -599,9 +581,16 @@ function makeEngine(prefix) {
   }
 
   function connectToWebAudio(i) {
-    // Deliberately empty - createMediaElementSource causes fragmentation
-    // on iOS when combined with playbackRate changes.
-    // Volume is controlled via audio.volume directly instead.
+    if (!actx || srcNodes[i] || !audioEls[i] || !audioEls[i].src) return;
+    try {
+      var src = actx.createMediaElementSource(audioEls[i]);
+      var g   = actx.createGain();
+      g.gain.value = mutedArr[i] ? 0 : Math.max(0, Math.min(1, volumes[i] || 0.8));
+      src.connect(g);
+      g.connect(actx.destination);
+      srcNodes[i] = src;
+      gainNodes[i] = g;
+    } catch(e){ console.warn('connectToWebAudio error', e); }
   }
 
   function applyRates() {
@@ -662,18 +651,16 @@ function makeEngine(prefix) {
 
   function setVolume(i, vol) {
     volumes[i] = vol;
-    if (audioEls[i] && !mutedArr[i]) {
-      audioEls[i].volume = Math.max(0, Math.min(1, vol));
-    }
+    if (gainNodes[i] && actx) gainNodes[i].gain.setTargetAtTime(vol, actx.currentTime, 0.01);
+    else if (audioEls[i]) audioEls[i].volume = mutedArr[i] ? 0 : Math.max(0, Math.min(1, vol));
   }
 
   function setMuted(i, isMuted, vol) {
     mutedArr[i] = isMuted;
     if (vol !== undefined) volumes[i] = vol;
-    if (audioEls[i]) {
-      audioEls[i].muted = isMuted;
-      if (!isMuted) audioEls[i].volume = Math.max(0, Math.min(1, volumes[i] || 0.8));
-    }
+    var v = isMuted ? 0 : Math.max(0, Math.min(1, volumes[i] || 0.8));
+    if (gainNodes[i] && actx) gainNodes[i].gain.setTargetAtTime(v, actx.currentTime, 0.01);
+    else if (audioEls[i]) audioEls[i].volume = v;
   }
 
   function stop() {
@@ -690,13 +677,10 @@ function makeEngine(prefix) {
 
   function startPlay() {
     if (!audioEls.some(function(a){return a&&a.src;})) { toast('Keine Audiodateien geladen'); return; }
-    applyRates();
+    audioEls.forEach(function(a,i){ if(a&&a.src) connectToWebAudio(i); });
     audioEls.forEach(function(a,i){
       if(!a||!a.src) return;
-      // Set volume BEFORE play - must happen before any Web Audio connection
-      var vol = mutedArr[i] ? 0 : Math.max(0, Math.min(1, volumes[i] || 0.8));
-      a.volume = vol;
-      a.muted = false; // ensure not muted at element level
+      if (gainNodes[i] && actx) gainNodes[i].gain.value = mutedArr[i] ? 0 : Math.max(0, Math.min(1, volumes[i] || 0.8));
       a.play().catch(function(e){console.warn('play error',e);});
     });
     playing=true;
