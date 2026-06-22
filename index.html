@@ -662,13 +662,18 @@ function makeEngine(prefix) {
 
   function setVolume(i, vol) {
     volumes[i] = vol;
-    if (audioEls[i]) audioEls[i].volume = mutedArr[i] ? 0 : Math.max(0, Math.min(1, vol));
+    if (audioEls[i] && !mutedArr[i]) {
+      audioEls[i].volume = Math.max(0, Math.min(1, vol));
+    }
   }
 
   function setMuted(i, isMuted, vol) {
     mutedArr[i] = isMuted;
     if (vol !== undefined) volumes[i] = vol;
-    if (audioEls[i]) audioEls[i].volume = isMuted ? 0 : Math.max(0, Math.min(1, volumes[i] || 0.8));
+    if (audioEls[i]) {
+      audioEls[i].muted = isMuted;
+      if (!isMuted) audioEls[i].volume = Math.max(0, Math.min(1, volumes[i] || 0.8));
+    }
   }
 
   function stop() {
@@ -688,7 +693,10 @@ function makeEngine(prefix) {
     applyRates();
     audioEls.forEach(function(a,i){
       if(!a||!a.src) return;
-      a.volume = mutedArr[i] ? 0 : Math.max(0, Math.min(1, volumes[i] || 0.8));
+      // Set volume BEFORE play - must happen before any Web Audio connection
+      var vol = mutedArr[i] ? 0 : Math.max(0, Math.min(1, volumes[i] || 0.8));
+      a.volume = vol;
+      a.muted = false; // ensure not muted at element level
       a.play().catch(function(e){console.warn('play error',e);});
     });
     playing=true;
