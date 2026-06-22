@@ -694,13 +694,21 @@ function makeEngine(prefix) {
   }
 
   function doPlay() {
-    if (!bufs.some(function(b){return b;})) {
+    var hasRaw = rawBufs.some(function(b){return b;});
+    var hasBuf = bufs.some(function(b){return b;});
+    if (!hasRaw && !hasBuf) {
+      toast('Keine Audiodateien geladen'); return;
+    }
+    if (!hasBuf && hasRaw) {
+      toast('Dekodiere Audio…', 5000);
       decodeAll(function() {
         if (bufs.some(function(b){return b;})) {
           startSources();
           playing = true;
           var pb=el('-play-btn'); if(pb) pb.textContent='⏸';
-        } else { toast('Keine Audiodateien geladen'); }
+        } else {
+          toast('Dekodierung fehlgeschlagen');
+        }
       });
     } else {
       startSources();
@@ -1730,7 +1738,7 @@ async function admSaveMarker() {
 
 function renderAdmMarkers() {
   const el = document.getElementById('adm-section-markers');
-  if (!el || !admSong?.markers?.length) { if(el) el.innerHTML=''; return; }
+  if (!el || !admSong && admSong.markers?.length) { if(el) el.innerHTML=''; return; }
   el.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:.75rem;padding:.75rem 1.25rem;background:var(--surface);border:1px solid var(--surface3);border-radius:var(--radius)">
     <span style="font-size:.75rem;color:var(--text3);width:100%;margin-bottom:4px">Abschnitte</span>
     ${admSong.markers.map((m,i)=>`
@@ -1827,15 +1835,14 @@ loadEnsSong = async function(id) {
   if (!id) return;
   // Load markers from song
   const { data:song } = await sb.from('songs').select('markers').eq('id',id).single();
-  if (song?.markers) {
+  if (song && song.markers) {
     try {
       const markers = typeof song.markers === 'string' ? JSON.parse(song.markers) : song.markers;
       renderEnsMarkers(markers);
     } catch(e) {}
   }
-  loadEnsAnnouncements(id.split('_')[0]); // will use ensemble_id from song
-  // Actually load by ensemble
-  if (ensSong) loadEnsAnnouncements(ensSong.ensemble_id);
+  if (ensSong && ensSong.ensemble_id) loadEnsAnnouncements(ensSong.ensemble_id);
+  else if (session && session.ensemble) loadEnsAnnouncements(session.ensemble.id);
 };
 
 // ── PATCH openAdmMixer to load markers ────────────────────────────────────────
@@ -1846,7 +1853,7 @@ openAdmMixer = async function(songId) {
   const mixerTab = document.getElementById('atab-btn-mixer');
   if (mixerTab) mixerTab.style.display = 'block';
   await _origOpenAdmMixer(songId);
-  if (admSong?.markers) {
+  if (admSong && admSong.markers) {
     try {
       const markers = typeof admSong.markers === 'string' ? JSON.parse(admSong.markers) : admSong.markers;
       admSong.markers = markers;
