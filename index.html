@@ -235,6 +235,18 @@
           <button class="play-btn" id="ens-play-btn" onclick="ensTogglePlay()">▶</button>
           <button class="transport-btn" id="ens-loop-btn" onclick="ensToggleLoop()">🔁</button>
         </div>
+        <div id="ens-tempo-section" style="display:none">
+          <div class="tempo-row">
+            <span class="tempo-label">Tempo</span>
+            <input type="range" min="50" max="150" value="100" id="ens-tempo-slider" oninput="ensSetTempo(this.value)">
+            <span class="tempo-val" id="ens-tempo-val">100%</span>
+          </div>
+          <div class="tempo-row" style="margin-top:.6rem;padding-top:.6rem">
+            <span class="tempo-label">Tonlage</span>
+            <input type="range" min="-6" max="6" value="0" step="1" id="ens-pitch-slider" oninput="ensSetPitch(this.value)">
+            <span class="tempo-val" id="ens-pitch-val">0 HT</span>
+          </div>
+        </div>
 
         <div style="display:flex;align-items:center;justify-content:space-between;margin-top:.75rem;padding-top:.75rem;border-top:1px solid var(--surface3)">
           <span style="font-size:.78rem;color:var(--text3)">Metronom</span>
@@ -351,6 +363,18 @@
           <button class="transport-btn" onclick="admSkipBack()">⏮</button>
           <button class="play-btn" id="adm-play-btn" onclick="admTogglePlay()">▶</button>
           <button class="transport-btn" id="adm-loop-btn" onclick="admToggleLoop()">🔁</button>
+        </div>
+        <div id="adm-tempo-section" style="display:none">
+          <div class="tempo-row">
+            <span class="tempo-label">Tempo</span>
+            <input type="range" min="50" max="150" value="100" id="adm-tempo-slider" oninput="admSetTempo(this.value)">
+            <span class="tempo-val" id="adm-tempo-val">100%</span>
+          </div>
+          <div class="tempo-row" style="margin-top:.6rem;padding-top:.6rem">
+            <span class="tempo-label">Tonlage</span>
+            <input type="range" min="-6" max="6" value="0" step="1" id="adm-pitch-slider" oninput="admSetPitch(this.value)">
+            <span class="tempo-val" id="adm-pitch-val">0 HT</span>
+          </div>
         </div>
 
         <div style="display:flex;align-items:center;justify-content:space-between;margin-top:.75rem;padding-top:.75rem;border-top:1px solid var(--surface3)">
@@ -471,6 +495,10 @@
 <div class="toast" id="toast"></div>
 
 <script>
+// ── GERÄTEERKENNUNG ───────────────────────────────────────────────────────────
+var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+var isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
 // ── SUPABASE ──────────────────────────────────────────────────────────────────
 const SUPA_URL = 'https://khbbmzxsrtekzggvpvuw.supabase.co';
 const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtoYmJtenhzcnRla3pnZ3ZwdnV3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA2NzEzOTcsImV4cCI6MjA5NjI0NzM5N30.NdfO6uEB_dHvOjB3S89FAh_ojrTZJyjUqLMBpTdTLFQ';
@@ -539,6 +567,11 @@ async function doLogin() {
 function showScreen(id) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById(id).classList.add('active');
+  // Show tempo/pitch controls only on non-iOS
+  if (!isIOS) {
+    var sections = document.querySelectorAll('#ens-tempo-section, #adm-tempo-section');
+    sections.forEach(function(s){ s.style.display = 'block'; });
+  }
 }
 function logoutEnsemble() { ensEngine.stop(); showScreen('screen-login'); }
 function logoutAdmin()    { admEngine.stop(); showScreen('screen-login'); }
