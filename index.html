@@ -587,15 +587,18 @@ function makeEngine(prefix) {
   function fmt(s){var m=Math.floor(Math.max(0,s)/60),sc=Math.floor(Math.max(0,s)%60);return m+':'+(sc<10?'0':'')+sc;}
   function el(id){return document.getElementById(prefix+id);}
 
-  function unlockAndResume() {
+  function unlockAndResume(callback) {
     if (!actx) actx = new (window.AudioContext||window.webkitAudioContext)();
+    // Play silent buffer synchronously to unlock iOS
+    try {
+      var sb2 = actx.createBuffer(1,1,22050);
+      var ss = actx.createBufferSource();
+      ss.buffer = sb2; ss.connect(actx.destination); ss.start(0);
+    } catch(e) {}
     if (actx.state !== 'running') {
-      try {
-        var sb = actx.createBuffer(1,1,22050);
-        var ss = actx.createBufferSource();
-        ss.buffer = sb; ss.connect(actx.destination); ss.start(0);
-      } catch(e) {}
-      actx.resume();
+      actx.resume().then(function(){ if(callback) callback(); });
+    } else {
+      if (callback) callback();
     }
   }
 
@@ -718,12 +721,15 @@ function makeEngine(prefix) {
   }
 
   function togglePlay() {
-    unlockAndResume(); // synchronous iOS unlock in click handler
     if (playing) {
-      pauseOffset = Math.min((actx.currentTime - playStartAt) * tempoRate, duration);
+      // Pause: immediate, no need to wait for context
+      if (actx) pauseOffset = Math.min((actx.currentTime - playStartAt) * tempoRate, duration);
       stopSrcs(); playOff();
     } else {
-      doPlay();
+      // Play: unlock context first, then start
+      unlockAndResume(function() {
+        doPlay();
+      });
     }
   }
 
