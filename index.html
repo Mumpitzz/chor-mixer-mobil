@@ -911,7 +911,7 @@ async function loadEnsSong(id) {
   song.voices = (voices||[]).map(v=>({...v,muted:false,soloed:false}));
   ensSong = song;
   ensEngine.reset(song.voices.length);
-  song.voices.forEach((v,i) => { ensEngine.gainNodes[i].setVolume(v.volume/100); });
+  song.voices.forEach(function(v,i){ ensEngine.setVolume(i, v.volume/100); });
   renderEnsTracks();
   song.voices.forEach((v,i) => {
     if (!v.storage_path) return;
@@ -958,14 +958,14 @@ function ensSetVol(i,val) {
   if(!ensSong) return;
   ensSong.voices[i].volume=+val;
   document.getElementById('ens-vp-'+i).textContent=val+'%';
-  if(ensEngine.gainNodes[i]&&!ensSong.voices[i].muted) ensEngine.gainNodes[i].setVolume(val/100);
+  ensEngine.setVolume(i, ensSong.voices[i].muted ? 0 : val/100);
 }
 function ensToggleMute(i) {
   if(!ensSong) return;
   ensSong.voices[i].muted=!ensSong.voices[i].muted;
   document.getElementById('ens-tc-'+i).classList.toggle('muted',ensSong.voices[i].muted);
   document.getElementById('ens-mb-'+i).classList.toggle('mute-active',ensSong.voices[i].muted);
-  ensEngine.gainNodes[i].setMuted(ensSong.voices[i].muted); ensEngine.gainNodes[i].setVolume(ensSong.voices[i].volume/100);
+  ensEngine.setMuted(i, ensSong.voices[i].muted, ensSong.voices[i].volume/100);
 }
 function ensToggleSolo(i) {
   if(!ensSong) return;
@@ -982,7 +982,7 @@ function ensToggleSolo(i) {
   }
   const anySolo=ensSong.voices.some(v=>v.soloed);
   ensSong.voices.forEach((v,j)=>{
-    if(ensEngine.gainNodes[j]){ ensEngine.gainNodes[j].setMuted(anySolo?!v.soloed:v.muted); ensEngine.gainNodes[j].setVolume(v.volume/100); }
+    ensEngine.setMuted(j, anySolo?!v.soloed:v.muted, v.volume/100);
   });
 }
 function ensTogglePlay(){ensEngine.togglePlay();}
@@ -1186,7 +1186,7 @@ async function openAdmMixer(songId) {
   admSong=song;
   document.getElementById('adm-song-title').textContent=song.name;
   admEngine.reset(song.voices.length);
-  song.voices.forEach((v,i)=>{admEngine.gainNodes[i].setVolume(v.volume/100);});
+  song.voices.forEach(function(v,i){admEngine.setVolume(i, v.volume/100);});
   renderAdmTracks();
   song.voices.forEach((v,i)=>{
     if(!v.storage_path) return;
@@ -1245,7 +1245,7 @@ function admSetVol(i,val) {
   if(!admSong) return;
   admSong.voices[i].volume=+val;
   document.getElementById('adm-vp-'+i).textContent=val+'%';
-  if(admEngine.gainNodes[i]&&!admSong.voices[i].muted) admEngine.gainNodes[i].setVolume(val/100);
+  admEngine.setVolume(i, admSong.voices[i].muted ? 0 : val/100);
   sb.from('voices').update({volume:+val}).eq('id',admSong.voices[i].id);
 }
 function admToggleMute(i) {
@@ -1253,7 +1253,7 @@ function admToggleMute(i) {
   admSong.voices[i].muted=!admSong.voices[i].muted;
   document.getElementById('adm-tc-'+i).classList.toggle('muted',admSong.voices[i].muted);
   document.getElementById('adm-mb-'+i).classList.toggle('mute-active',admSong.voices[i].muted);
-  admEngine.gainNodes[i].setMuted(admSong.voices[i].muted); admEngine.gainNodes[i].setVolume(admSong.voices[i].volume/100);
+  admEngine.setMuted(i, admSong.voices[i].muted, admSong.voices[i].volume/100);
 }
 function admToggleSolo(i) {
   if(!admSong) return;
@@ -1270,7 +1270,7 @@ function admToggleSolo(i) {
   }
   const anySolo=admSong.voices.some(v=>v.soloed);
   admSong.voices.forEach((v,j)=>{
-    if(admEngine.gainNodes[j]){ admEngine.gainNodes[j].setMuted(anySolo?!v.soloed:v.muted); admEngine.gainNodes[j].setVolume(v.volume/100); }
+    admEngine.setMuted(j, anySolo?!v.soloed:v.muted, v.volume/100);
   });
 }
 async function admDeleteVoice(i) {
@@ -1280,9 +1280,9 @@ async function admDeleteVoice(i) {
   admSong.voices.splice(i,1);
   admEngine.stop();
   admEngine.reset(admSong.voices.length);
-  admSong.voices.forEach((v,j)=>{admEngine.gainNodes[j].setVolume(v.volume/100);});
+  admSong.voices.forEach(function(v,j){admEngine.setVolume(j,v.volume/100);});
   renderAdmTracks();
-  admSong.voices.forEach((v,j)=>{if(v.storage_path)admEngine.loadFromUrl(j,v.storage_path);});
+  admSong.voices.forEach(function(v,j){if(v.storage_path)admEngine.loadFromUrl(j,v.storage_path);});
   toast('Stimme gelöscht');
 }
 async function admAddVoice() {
@@ -1293,9 +1293,9 @@ async function admAddVoice() {
   admSong.voices.push({...v,muted:false,soloed:false});
   admEngine.stop();
   admEngine.reset(admSong.voices.length);
-  admSong.voices.forEach((v,j)=>{admEngine.gainNodes[j].setVolume(v.volume/100);});
+  admSong.voices.forEach(function(v,j){admEngine.setVolume(j,v.volume/100);});
   renderAdmTracks();
-  admSong.voices.forEach((v,j)=>{if(v.storage_path)admEngine.loadFromUrl(j,v.storage_path);});
+  admSong.voices.forEach(function(v,j){if(v.storage_path)admEngine.loadFromUrl(j,v.storage_path);});
   toast('Stimme hinzugefügt');
 }
 
