@@ -562,14 +562,13 @@ function logoutEnsemble() { ensEngine.stop(); showScreen('screen-login'); }
 function logoutAdmin()    { admEngine.stop(); showScreen('screen-login'); }
 
 // ── AUDIO ENGINE (iOS-optimiert) ──────────────────────────────────────────────
-// Web Audio API + silent buffer unlock für iOS Safari
-// HTML Audio als Fallback für Kompatibilität
+// HTML Audio für preservesPitch + Web Audio API für Unlock und Lautstärke
 function makeEngine(prefix) {
   var actx      = null;
+  var audioEls  = [];
   var gainNodes = [];
-  var bufs      = [];
-  var rawBufs   = [];
   var srcNodes  = [];
+  var bufUrls   = {};
   var playing   = false;
   var looping   = false;
   var tempoRate = 1.0;
@@ -578,23 +577,20 @@ function makeEngine(prefix) {
   var loopStart = -1;
   var loopEnd   = -1;
   var ticker    = null;
-  var playStartAt  = 0;
-  var pauseOffset  = 0;
-  var voiceCount   = 0;
-  var volumes      = [];
-  var mutedState   = [];
+  var volumes   = [];
+  var mutedArr  = [];
 
   function fmt(s){var m=Math.floor(Math.max(0,s)/60),sc=Math.floor(Math.max(0,s)%60);return m+':'+(sc<10?'0':'')+sc;}
   function el(id){return document.getElementById(prefix+id);}
 
   function unlockAndResume(callback) {
     if (!actx) actx = new (window.AudioContext||window.webkitAudioContext)();
-    // Play silent buffer synchronously to unlock iOS
+    // Silent buffer trick to unlock iOS audio session
     try {
-      var sb2 = actx.createBuffer(1,1,22050);
+      var sb = actx.createBuffer(1,1,22050);
       var ss = actx.createBufferSource();
-      ss.buffer = sb2; ss.connect(actx.destination); ss.start(0);
-    } catch(e) {}
+      ss.buffer=sb; ss.connect(actx.destination); ss.start(0);
+    } catch(e){}
     if (actx.state !== 'running') {
       actx.resume().then(function(){ if(callback) callback(); });
     } else {
@@ -602,182 +598,155 @@ function makeEngine(prefix) {
     }
   }
 
-  function ensureGainNodes() {
-    if (!actx || gainNodes.length === voiceCount) return;
-    gainNodes.forEach(function(g){try{g.disconnect();}catch(e){}});
-    gainNodes = [];
-    for (var i = 0; i < voiceCount; i++) {
-      var g = actx.createGain();
-      g.gain.value = mutedState[i] ? 0 : (volumes[i] || 0.8);
-      g.connect(actx.destination);
-      gainNodes[i] = g;
-    }
+  function connectToWebAudio(i) {
+    if (!actx || srcNodes[i]) return;
+    try {
+      var src = actx.createMediaElementSource(audioEls[i]);
+      var g   = actx.createGain();
+      g.gain.value = mutedArr[i] ? 0 : (volumes[i] || 0.8);
+      src.connect(g); g.connect(actx.destination);
+      srcNodes[i] = src; gainNodes[i] = g;
+    } catch(e){}
   }
 
-  function decodeAll(callback) {
-    var pending = 0;
-    rawBufs.forEach(function(ab, i) {
-      if (!ab || bufs[i]) return;
-      pending++;
-      actx.decodeAudioData(ab.slice(0), function(decoded) {
-        bufs[i] = decoded;
-        if (decoded.duration > duration) {
-          duration = decoded.duration;
-          var tt = el('-time-tot'); if(tt) tt.textContent = fmt(duration/tempoRate);
-        }
-        pending--;
-        if (pending === 0 && callback) callback();
-      }, function() { pending--; if(pending===0&&callback) callback(); });
+  function applyRates() {
+    var pitchFactor = Math.pow(2, pitchSemitones/12);
+    audioEls.forEach(function(a){
+      if (!a||!a.src) return;
+      a.playbackRate = tempoRate * pitchFactor;
+      // preservesPitch corrects pitch when only tempo changes
+      a.preservesPitch = (pitchSemitones === 0);
+      a.mozPreservesPitch = (pitchSemitones === 0);
+      a.webkitPreservesPitch = (pitchSemitones === 0);
     });
-    if (pending === 0 && callback) callback();
   }
 
   function recalcDuration() {
-    duration = bufs.reduce(function(m,b){return b?Math.max(m,b.duration):m;}, 0);
-    var tt = el('-time-tot'); if(tt) tt.textContent = fmt(duration/tempoRate);
+    var max=0;
+    audioEls.forEach(function(a){if(a&&a.src&&a.duration&&isFinite(a.duration))max=Math.max(max,a.duration);});
+    duration=max;
+    var tt=el('-time-tot'); if(tt) tt.textContent=fmt(duration/tempoRate);
   }
 
   function reset(n) {
-    stopAll(); playOff();
-    bufs = new Array(n).fill(null);
-    rawBufs = new Array(n).fill(null);
-    srcNodes = []; gainNodes = [];
-    duration = 0; pauseOffset = 0;
-    voiceCount = n;
+    stop(); playOff();
+    Object.keys(bufUrls).forEach(function(k){try{URL.revokeObjectURL(bufUrls[k]);}catch(e){}});
+    bufUrls={};
+    srcNodes.forEach(function(s){try{s.disconnect();}catch(e){}});
+    srcNodes=[];
+    gainNodes.forEach(function(g){try{g.disconnect();}catch(e){}});
+    gainNodes=[];
+    audioEls=[];
     volumes = new Array(n).fill(0.8);
-    mutedState = new Array(n).fill(false);
+    mutedArr= new Array(n).fill(false);
+    duration=0;
     var tt=el('-time-tot'); if(tt) tt.textContent='0:00';
     var tc=el('-time-cur'); if(tc) tc.textContent='0:00';
+    for (var i=0; i<n; i++) {
+      var a = new Audio();
+      a.crossOrigin='anonymous';
+      a.preload='auto';
+      a.volume=0.8;
+      audioEls[i]=a;
+      (function(idx){
+        a.addEventListener('ended', function(){
+          var anyPlaying=audioEls.some(function(x){return x&&x.src&&!x.paused&&!x.ended;});
+          if (!anyPlaying && playing) {
+            if (looping) { audioEls.forEach(function(x){if(x&&x.src){x.currentTime=0;x.play().catch(function(){});}}); }
+            else { stop(); playOff(); }
+          }
+        });
+      })(i);
+    }
   }
 
   function setVolume(i, vol) {
-    volumes[i] = vol;
-    if (gainNodes[i] && actx) gainNodes[i].gain.setTargetAtTime(vol, actx.currentTime, 0.01);
+    volumes[i]=vol;
+    if (gainNodes[i]&&actx) gainNodes[i].gain.setTargetAtTime(vol,actx.currentTime,0.01);
+    else if (audioEls[i]) audioEls[i].volume=mutedArr[i]?0:Math.max(0,Math.min(1,vol));
   }
 
   function setMuted(i, isMuted, vol) {
-    mutedState[i] = isMuted;
-    if (vol !== undefined) volumes[i] = vol;
-    var v = isMuted ? 0 : (volumes[i] || 0.8);
-    if (gainNodes[i] && actx) gainNodes[i].gain.setTargetAtTime(v, actx.currentTime, 0.01);
+    mutedArr[i]=isMuted;
+    if (vol!==undefined) volumes[i]=vol;
+    var v=isMuted?0:(volumes[i]||0.8);
+    if (gainNodes[i]&&actx) gainNodes[i].gain.setTargetAtTime(v,actx.currentTime,0.01);
+    else if (audioEls[i]) audioEls[i].volume=v;
   }
 
-  function stopSrcs() {
-    srcNodes.forEach(function(s){try{if(s)s.stop();}catch(e){}});
-    srcNodes = []; clearInterval(ticker);
-  }
-
-  function stopAll() {
-    stopSrcs(); pauseOffset = 0;
+  function stop() {
+    audioEls.forEach(function(a){try{a.pause();a.currentTime=0;}catch(e){}});
+    clearInterval(ticker);
     var pf=el('-progress-fill'); if(pf) pf.style.width='0%';
     var tc=el('-time-cur'); if(tc) tc.textContent='0:00';
   }
 
   function playOff() {
-    playing = false;
+    playing=false;
     var pb=el('-play-btn'); if(pb) pb.textContent='▶';
   }
 
-  function startSources() {
-    ensureGainNodes();
-    stopSrcs();
-    var rate = tempoRate;
-    var now = actx.currentTime;
-    playStartAt = now - pauseOffset / rate;
-    bufs.forEach(function(buf, i) {
-      if (!buf) return;
-      var src = actx.createBufferSource();
-      src.buffer = buf;
-      src.playbackRate.value = rate;
-      src.connect(gainNodes[i] || actx.destination);
-      src.start(now, pauseOffset);
-      srcNodes[i] = src;
+  function startPlay() {
+    if (!audioEls.some(function(a){return a&&a.src;})) { toast('Keine Audiodateien geladen'); return; }
+    // Connect all audio elements to Web Audio API for volume control
+    audioEls.forEach(function(a,i){ if(a&&a.src) connectToWebAudio(i); });
+    applyRates();
+    audioEls.forEach(function(a){
+      if(!a||!a.src) return;
+      a.play().catch(function(e){console.warn('play error',e);});
     });
-    ticker = setInterval(tick, 80);
-  }
-
-  function doPlay() {
-    var hasRaw = rawBufs.some(function(b){return b;});
-    var hasBuf = bufs.some(function(b){return b;});
-    if (!hasRaw && !hasBuf) {
-      toast('Keine Audiodateien geladen'); return;
-    }
-    if (!hasBuf && hasRaw) {
-      toast('Dekodiere Audio…', 5000);
-      decodeAll(function() {
-        if (bufs.some(function(b){return b;})) {
-          startSources();
-          playing = true;
-          var pb=el('-play-btn'); if(pb) pb.textContent='⏸';
-        } else {
-          toast('Dekodierung fehlgeschlagen');
-        }
-      });
-    } else {
-      startSources();
-      playing = true;
-      var pb=el('-play-btn'); if(pb) pb.textContent='⏸';
-    }
+    playing=true;
+    var pb=el('-play-btn'); if(pb) pb.textContent='⏸';
+    ticker=setInterval(tick,80);
   }
 
   function togglePlay() {
     if (playing) {
-      // Pause: immediate, no need to wait for context
-      if (actx) pauseOffset = Math.min((actx.currentTime - playStartAt) * tempoRate, duration);
-      stopSrcs(); playOff();
+      audioEls.forEach(function(a){try{a.pause();}catch(e){}});
+      clearInterval(ticker); playOff();
     } else {
-      // Play: unlock context first, then start
-      unlockAndResume(function() {
-        doPlay();
-      });
+      unlockAndResume(function(){ startPlay(); });
     }
   }
 
   function tick() {
-    if (!playing || !duration) return;
-    var elapsed = (actx.currentTime - playStartAt) * tempoRate;
-    if (looping && loopStart >= 0 && loopEnd > loopStart) {
-      if (elapsed >= loopEnd) {
-        pauseOffset = loopStart;
-        stopSrcs();
-        startSources();
-        return;
+    if(!playing||!duration) return;
+    var a=audioEls.find(function(x){return x&&x.src&&!x.paused&&!x.ended;});
+    if(!a){
+      var anyEnded=audioEls.some(function(x){return x&&x.src&&x.ended;});
+      if(anyEnded){
+        if(looping){audioEls.forEach(function(x){if(x&&x.src){x.currentTime=0;x.play().catch(function(){});}});}
+        else{stop();playOff();}
       }
-    } else if (elapsed >= duration) {
-      if (looping) { pauseOffset=0; stopSrcs(); startSources(); }
-      else { stopAll(); playOff(); }
       return;
     }
-    var total = duration / tempoRate;
-    var pf=el('-progress-fill'); if(pf) pf.style.width=(elapsed/duration*100)+'%';
-    var tc=el('-time-cur'); if(tc) tc.textContent=fmt(elapsed/tempoRate);
+    var elapsed=a.currentTime/tempoRate;
+    var total=duration/tempoRate;
+    if(looping&&loopStart>=0&&loopEnd>loopStart){
+      if(elapsed>=loopEnd){audioEls.forEach(function(x){if(x&&x.src)x.currentTime=loopStart*tempoRate;});return;}
+    }
+    var pf=el('-progress-fill'); if(pf) pf.style.width=(elapsed/total*100)+'%';
+    var tc=el('-time-cur'); if(tc) tc.textContent=fmt(elapsed);
   }
 
   function seek(e) {
     var track=el('-progress-track'); if(!track) return;
     var rect=track.getBoundingClientRect();
     var pct=Math.max(0,Math.min(1,(e.clientX-rect.left)/rect.width));
-    pauseOffset = pct * duration;
+    var pos=pct*duration/tempoRate;
+    audioEls.forEach(function(a){if(a&&a.src)a.currentTime=pos;});
     var pf=el('-progress-fill'); if(pf) pf.style.width=(pct*100)+'%';
-    var tc=el('-time-cur'); if(tc) tc.textContent=fmt(pauseOffset/tempoRate);
-    if (playing) { stopSrcs(); startSources(); }
+    var tc=el('-time-cur'); if(tc) tc.textContent=fmt(pos);
   }
 
   function setTempo(val) {
-    var wasPlaying = playing;
-    var pos = playing ? (actx.currentTime-playStartAt)*tempoRate : pauseOffset;
-    if (wasPlaying) { stopSrcs(); clearInterval(ticker); playing=false; }
-    tempoRate = val/100;
+    tempoRate=val/100;
     var tv=el('-tempo-val'); if(tv) tv.textContent=val+'%';
     var tt=el('-time-tot'); if(tt) tt.textContent=fmt(duration/tempoRate);
-    pauseOffset = Math.min(pos, duration);
-    if (wasPlaying) {
-      startSources(); playing=true;
-      var pb=el('-play-btn'); if(pb) pb.textContent='⏸';
-    }
+    applyRates();
   }
 
-  function setPitch(semitones) { pitchSemitones = semitones; }
+  function setPitch(semitones) { pitchSemitones=semitones; applyRates(); }
 
   function toggleLoop() {
     looping=!looping;
@@ -826,50 +795,40 @@ function makeEngine(prefix) {
   function getTempoRate(){return tempoRate;}
   function setLoopPoint(){}
 
-  async function loadFromUrl(i, path) {
-    try {
+  async function loadFromUrl(i,path){
+    if(!audioEls[i]) return false;
+    try{
       var res=await fetch(pubUrl(path));
       if(!res.ok) throw new Error();
-      var ab=await res.arrayBuffer();
-      rawBufs[i]=ab;
-      var estimatedDur=ab.byteLength/(128000/8);
-      if(estimatedDur>duration){
-        duration=estimatedDur;
-        var tt=el('-time-tot'); if(tt) tt.textContent=fmt(duration/tempoRate);
-      }
-      if(actx&&actx.state==='running') {
-        return new Promise(function(resolve){
-          actx.decodeAudioData(ab.slice(0),function(decoded){bufs[i]=decoded;recalcDuration();resolve(true);},function(){resolve(false);});
-        });
-      }
-      return true;
-    } catch(e){return false;}
+      var blob=await res.blob();
+      return loadFromBlob(i,blob);
+    }catch(e){return false;}
   }
 
-  async function loadFromBlob(i, blob) {
-    try {
-      var ab=await blob.arrayBuffer();
-      rawBufs[i]=ab;
-      var estimatedDur=ab.byteLength/(128000/8);
-      if(estimatedDur>duration){
-        duration=estimatedDur;
-        var tt=el('-time-tot'); if(tt) tt.textContent=fmt(duration/tempoRate);
-      }
-      if(actx&&actx.state==='running') {
-        return new Promise(function(resolve){
-          actx.decodeAudioData(ab.slice(0),function(decoded){bufs[i]=decoded;recalcDuration();resolve(true);},function(){resolve(false);});
-        });
-      }
+  async function loadFromBlob(i,blob){
+    if(!audioEls[i]) return false;
+    try{
+      var url=URL.createObjectURL(blob);
+      if(bufUrls[i]) URL.revokeObjectURL(bufUrls[i]);
+      bufUrls[i]=url;
+      audioEls[i].src=url;
+      await new Promise(function(resolve){
+        audioEls[i].onloadedmetadata=resolve;
+        audioEls[i].onerror=resolve;
+        setTimeout(resolve,3000);
+      });
+      recalcDuration();
+      if(actx&&!srcNodes[i]) connectToWebAudio(i);
       return true;
-    } catch(e){return false;}
+    }catch(e){return false;}
   }
 
   return {
     togglePlay:       togglePlay,
-    stop:             function(){stopAll();playOff();},
-    pause:            function(){if(playing){pauseOffset=Math.min((actx.currentTime-playStartAt)*tempoRate,duration);stopSrcs();playOff();}},
-    play:             function(){if(actx)doPlay();},
-    skipBack:         function(){stopAll();playOff();},
+    stop:             function(){stop();playOff();},
+    pause:            function(){audioEls.forEach(function(a){try{a.pause();}catch(e){}});clearInterval(ticker);playOff();},
+    play:             function(){startPlay();},
+    skipBack:         function(){stop();playOff();},
     seek:             seek,
     setTempo:         setTempo,
     setPitch:         setPitch,
@@ -888,7 +847,7 @@ function makeEngine(prefix) {
     reset:            reset,
     loadFromUrl:      loadFromUrl,
     loadFromBlob:     loadFromBlob,
-    _getAudioEls:     function(){return [];},
+    _getAudioEls:     function(){return audioEls;},
     isPlaying:        function(){return playing;},
     getGainNodes:     function(){return gainNodes;}
   };
