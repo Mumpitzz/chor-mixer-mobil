@@ -967,9 +967,11 @@ function switchEnsTab(tab) {
 let adminEnsembles=[], adminSongs=[], admSong=null;
 
 async function adminInit() {
-  // Show admins tab only for owner
-  const adminsTab = document.getElementById('atab-btn-admins');
-  if (adminsTab) adminsTab.style.display = session.admin?.is_owner ? 'block' : 'none';
+  // Admins-Tab immer sichtbar (für Passwort ändern), Owner-Bereiche separat steuern
+  const addAdminBtn = document.querySelector('[onclick="showModal(\'modal-add-admin\')"]');
+  if (addAdminBtn) addAdminBtn.style.display = session.admin?.is_owner ? 'block' : 'none';
+  const adminsList = document.getElementById('admin-admins-list');
+  if (adminsList) adminsList.style.display = session.admin?.is_owner ? 'block' : 'none';
   await Promise.all([adminLoadEnsembles(), adminLoadAdmins()]);
   await adminLoadSongs();
 }
