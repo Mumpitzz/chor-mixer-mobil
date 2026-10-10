@@ -976,11 +976,41 @@ async function adminInit() {
 
 // Ensembles
 async function adminLoadEnsembles() {
-  let query = sb.from('ensembles').select('*').order('created_at');
-  if (!session.admin?.is_owner) query = query.eq('admin_id', session.admin.id);
-  const { data, error } = await query;
-  if (error) { toast('Fehler: '+error.message, 5000); return; }
-  adminEnsembles = data||[];
+  let ensembles = [];
+  if (session.admin?.is_owner) {
+    // Owner sieht alle Ensembles
+    const { data, error } = await sb.from('ensembles').select('*').order('created_at');
+    if (error) { toast('Fehler: '+error.message, 5000); return; }
+    ensembles = data||[];
+  } else {
+    // Normaler Admin: eigene Ensembles + zugewiesene über admin_ensembles
+    const { data: ae, error: aeErr } = await sb.from('admin_ensembles')
+      .select('ensemble_id')
+      .eq('admin_id', session.admin.id);
+    if (aeErr) { toast('Fehler: '+aeErr.message, 5000); return; }
+    const assignedIds = (ae||[]).map(r=>r.ensemble_id);
+
+    const { data: own, error: ownErr } = await sb.from('ensembles')
+      .select('*')
+      .eq('admin_id', session.admin.id)
+      .order('created_at');
+    if (ownErr) { toast('Fehler: '+ownErr.message, 5000); return; }
+
+    if (assignedIds.length > 0) {
+      const { data: assigned, error: assErr } = await sb.from('ensembles')
+        .select('*')
+        .in('id', assignedIds)
+        .order('created_at');
+      if (assErr) { toast('Fehler: '+assErr.message, 5000); return; }
+      const allIds = new Set();
+      for (const e of [...(own||[]), ...(assigned||[])]) {
+        if (!allIds.has(e.id)) { allIds.add(e.id); ensembles.push(e); }
+      }
+    } else {
+      ensembles = own||[];
+    }
+  }
+  adminEnsembles = ensembles;
   renderAdminEnsembles();
 }
 
@@ -1047,17 +1077,42 @@ function adminFillFilter() {
 // Songs
 async function adminLoadSongs() {
   document.getElementById('admin-songs-list').innerHTML='<div class="loading"><div class="spinner"></div>Laden…</div>';
-  // Load all songs visible to this admin
-  let query = sb.from('songs').select('*').order('created_at');
-  if (!session.admin?.is_owner) {
-    // Get ensemble IDs this admin can access
+  if (session.admin?.is_owner) {
+    // Owner sieht alle Lieder
+    const {data} = await sb.from('songs').select('*').order('created_at');
+    adminSongs = data||[];
+  } else {
+    // Normaler Admin: alle Ensemble-IDs ermitteln (eigene + zugewiesene)
     const {data:ae} = await sb.from('admin_ensembles').select('ensemble_id').eq('admin_id', session.admin.id);
-    const ensIds = (ae||[]).map(x=>x.ensemble_id);
-    if (!ensIds.length) { document.getElementById('admin-songs-list').innerHTML='<div class="empty">Noch keine Lieder.</div>'; return; }
-    query = query.in('ensemble_id', ensIds);
+    const assignedIds = (ae||[]).map(x=>x.ensemble_id);
+    const {data:ownEns} = await sb.from('ensembles').select('id').eq('admin_id', session.admin.id);
+    const ownIds = (ownEns||[]).map(x=>x.id);
+    const allEnsIds = [...new Set([...assignedIds, ...ownIds])];
+
+    if (!allEnsIds.length) {
+      // Keine Ensembles – trotzdem nicht zugewiesene Lieder zeigen
+      const {data:allSe} = await sb.from('song_ensembles').select('song_id');
+      const assignedSongIds = new Set((allSe||[]).map(x=>x.song_id));
+      const {data:all} = await sb.from('songs').select('*').order('created_at');
+      adminSongs = (all||[]).filter(s=>!assignedSongIds.has(s.id));
+    } else {
+      // Lieder über song_ensembles Junction-Tabelle laden
+      const {data:se} = await sb.from('song_ensembles').select('song_id').in('ensemble_id', allEnsIds);
+      const songIds = new Set((se||[]).map(x=>x.song_id));
+
+      // Zusätzlich: Lieder die noch keinem Ensemble zugewiesen sind
+      const {data:allSe} = await sb.from('song_ensembles').select('song_id');
+      const allAssignedIds = new Set((allSe||[]).map(x=>x.song_id));
+      const {data:all} = await sb.from('songs').select('*').order('created_at');
+      const unassigned = (all||[]).filter(s=>!allAssignedIds.has(s.id));
+
+      // Zusammenführen: zugewiesene + nicht zugewiesene
+      const assigned = (all||[]).filter(s=>songIds.has(s.id));
+      const merged = new Map();
+      [...assigned, ...unassigned].forEach(s=>merged.set(s.id,s));
+      adminSongs = [...merged.values()].sort((a,b)=>a.created_at>b.created_at?1:-1);
+    }
   }
-  const {data} = await query;
-  adminSongs = data||[];
   renderAdminSongs();
 }
 
@@ -1948,5 +2003,3 @@ if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch
 </script>
 </body>
 </html>
-
-
